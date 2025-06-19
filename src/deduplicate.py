@@ -63,7 +63,7 @@ def main():
     print(f"Shape after dropping 'extra': {df.shape}")
 
     exact_dupes = df.duplicated().sum()
-    print(f"\n🧹 Exact duplicate rows: {exact_dupes}")
+    print(f"\n Exact duplicate rows: {exact_dupes}")
     df.drop_duplicates(inplace=True)
     print(f"Shape after exact deduplication: {df.shape}")
 
