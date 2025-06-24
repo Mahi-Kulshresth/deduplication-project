@@ -4,30 +4,90 @@ from rapidfuzz import process, fuzz
 from collections import defaultdict
 import os
 
+digit_word_map = {
+    "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+    "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+    "i": "1", "ii": "2", "iii": "3", "iv": "4", "v": "5",
+    "vi": "6", "vii": "7", "viii": "8", "ix": "9", "x": "10"
+}
+conflict_keywords = ["dlc", "bundle", "mac", "linux", "asia", "japan", "episode", "season", "expansion", "pack"]
+
+def normalize_title(title):
+    title = title.lower()
+    for word, digit in digit_word_map.items():
+        title = re.sub(rf"\b{re.escape(word)}\b", digit, title)
+    return title
+
+def extract_numbers_with_tokens(title):
+    title = normalize_title(title)
+    tokens = title.split()
+    result = []
+    for i, token in enumerate(tokens):
+        if token.isdigit():
+            prev = tokens[i - 1] if i > 0 else ""
+            if prev in conflict_keywords:
+                result.append((prev, int(token)))
+            else:
+                result.append(("", int(token)))
+    return result
+
+def safe_to_merge(title1, title2):
+    t1, t2 = normalize_title(title1), normalize_title(title2)
+
+    nums1 = extract_numbers_with_tokens(t1)
+    nums2 = extract_numbers_with_tokens(t2)
+
+    for (k1, n1) in nums1:
+        for (k2, n2) in nums2:
+            if k1 == k2 and n1 != n2 and k1 != "":
+                return False
+
+    plain_nums1 = {n for (k, n) in nums1 if k == ""}
+    plain_nums2 = {n for (k, n) in nums2 if k == ""}
+
+    if plain_nums1 and plain_nums2 and plain_nums1 != plain_nums2:
+        return False
+
+    if (plain_nums1 and not plain_nums2) or (plain_nums2 and not plain_nums1):
+        return False
+
+    for word in conflict_keywords:
+        if (word in t1 and word not in t2) or (word in t2 and word not in t1):
+            return False
+
+    similarity = fuzz.token_set_ratio(t1, t2)
+    return similarity >= 85
+
+# --- Preprocessing still used for title cleanup ---
 def preprocess_title(title):
     title = title.lower()
     title = re.sub(r'[\W_]+', ' ', title)
     return title.strip()
 
-def is_probably_sequel(t1, t2):
-    pattern = r'\b([ivx]+|\d+)\b'
-    n1 = re.findall(pattern, t1.lower())
-    n2 = re.findall(pattern, t2.lower())
-    return bool(n1 and n2 and n1 != n2)
-
 def fuzzy_deduplicate(df):
     df['clean-title'] = df['game-title'].apply(preprocess_title)
-    clean_titles = df['clean-title'].unique()
+    clean_titles = df['clean-title'].unique().tolist()
 
     cluster_map = {}
+    seen = set()
+
     for title in clean_titles:
-        if title in cluster_map:
+        if title in seen:
             continue
-        matches = process.extract(title, clean_titles, scorer=fuzz.token_sort_ratio, limit=None)
-        similar_titles = [m for m, score, _ in matches if score >= 90 and not is_probably_sequel(title, m)]
-        canonical = max(similar_titles, key=len)
-        for dup in similar_titles:
+
+        # RapidFuzz: Only get top 10 similar titles
+        matches = process.extract(
+            query=title,
+            choices=clean_titles,
+            scorer=fuzz.token_set_ratio,
+            limit=10
+        )
+
+        group = [m[0] for m in matches if safe_to_merge(title, m[0])]
+        canonical = sorted(group, key=lambda x: (len(x), x))[0]
+        for dup in group:
             cluster_map[dup] = canonical
+            seen.add(dup)
 
     df['canonical-title'] = df['clean-title'].map(cluster_map)
     df['game-title'] = df['canonical-title'].fillna(df['clean-title']).str.title()
@@ -35,7 +95,7 @@ def fuzzy_deduplicate(df):
 
     before = len(clean_titles)
     after = df['game-title'].nunique()
-    print(f" Fuzzy Deduplication Results: {before - after} titles merged (from {before} → {after})")
+    print(f" Fuzzy Deduplication: {before - after} titles merged ({before} → {after})")
 
     return df
 
@@ -43,9 +103,10 @@ def count_fuzzy_duplicate_pairs(titles):
     count = 0
     for i in range(len(titles)):
         for j in range(i + 1, len(titles)):
-            if fuzz.token_sort_ratio(titles[i], titles[j]) >= 90:
+            if safe_to_merge(titles[i], titles[j]):
                 count += 1
     return count
+
 
 def main():
     input_path = 'data/steam-200k.csv'
@@ -56,7 +117,7 @@ def main():
     df.columns = ['user-id', 'game-title', 'behavior', 'value', 'extra']
     print(f"Initial shape: {df.shape}")
 
-    print("\n🔍 Missing values:\n", df.isnull().sum())
+    print("\n Missing values:\n", df.isnull().sum())
 
     if df['extra'].nunique() == 1:
         df.drop(columns=['extra'], inplace=True)
