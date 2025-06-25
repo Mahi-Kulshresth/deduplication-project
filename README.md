@@ -17,7 +17,7 @@ The logic was first explored in a Jupyter notebook with visualizations and then 
 ## 🧹 Steps Performed
 
 ### 1. Data Loading and Initial Checks
-- Loaded `steam-200k.csv` (199,999 rows × 5 columns)
+- Loaded `steam-200k.csv` (200,000 rows × 5 columns)
 - Renamed columns for clarity
 - Dropped `extra` column (contained only 0s)
 
@@ -35,10 +35,16 @@ The logic was first explored in a Jupyter notebook with visualizations and then 
 - Combined both into a unified, deduplicated dataframe
 
 ### 5. Fuzzy Deduplication with Sequel Protection
-- Used `RapidFuzz` to detect similar game titles (≥90% similarity)
-- Preprocessed titles using tokenization and regex
-- **Protected sequels** (e.g., `'Call of Duty 2'` vs `'Call of Duty 3'`) using number/roman numeral checks
-- Merged fuzzy duplicates **only** when they referred to the same game
+Used RapidFuzz to identify game titles with ≥90% similarity. Applied logic to merge titles only if:
+
+- Titles had no numbers, or
+
+- Had same numeric meaning (e.g., "5", "V", "Five")
+
+- Did not differ in keywords like "DLC", "Bundle", "Episode", "Part", "Mac/Linux/NA/EU"
+
+- Titles like "GTA 5" and "GTA V" were merged
+Titles like "Call of Duty 4" and "Call of Duty 3" were skipped
 
 ---
 ## 📊 Results
@@ -52,6 +58,17 @@ The logic was first explored in a Jupyter notebook with visualizations and then 
 | Unique game titles after     | 5,026     |
 | Fuzzy duplicates merged      | 125       |
 | Remaining fuzzy-similar pairs| 175       |
+
+---
+
+## Tools Used
+- Pandas for data handling
+
+- RapidFuzz for fuzzy matching
+
+- Regex for numeric and keyword extraction
+
+- Matplotlib / Seaborn (optional for visualizations)
 
 ---
 
